@@ -264,7 +264,7 @@ class TMDBClient:
         try:
             data = self._get(f"/tv/{tv_id}", {})
         except TMDBError as exc:
-                log.warning("tv details=%s: %s", tv_id, exc)
+            log.warning("tv details=%s: %s", tv_id, exc)
             return None
         return _pick_season_premiere(data.get("seasons", []), week_start, week_end)
 
