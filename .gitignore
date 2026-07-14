@@ -1,0 +1,8 @@
+config.json
+.venv/
+__pycache__/
+*.pyc
+run.log
+sent_history.json
+
+.idea
