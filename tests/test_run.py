@@ -1,4 +1,4 @@
-"""Tests d'orchestration run() : styles card/text, dry-run vs envoi, historique."""
+"""run() orchestration tests: card/text styles, dry-run vs send, history."""
 import argparse
 import sys
 import types
@@ -14,7 +14,7 @@ def _rel(tid=1):
     return Release(
         media_type="movie", tmdb_id=tid, title=f"T{tid}",
         release_date="2026-07-15", year="2026", popularity=1.0,
-        vote_average=7.0, vote_count=10, genre_ids=(), sources={"Cinéma (FR)"},
+        vote_average=7.0, vote_count=10, genre_ids=(), sources={"Cinema (FR)"},
     )
 
 
@@ -59,7 +59,7 @@ def test_run_card_dry_run_prints_and_sends_nothing(monkeypatch, capsys):
     _patch(monkeypatch, [_rel()])
     rc = rt.run(_cfg(style="card"), _args(dry_run=True))
     assert rc == rt.EXIT_OK
-    assert FakeTelegram.instances == []  # rien construit/envoyé
+    assert FakeTelegram.instances == []  # nothing built/sent
     assert "DRY-RUN (card)" in capsys.readouterr().out
 
 
@@ -78,7 +78,7 @@ def test_run_card_sends_plan(monkeypatch):
     assert len(FakeTelegram.instances) == 1
     tg = FakeTelegram.instances[0]
     assert len(tg.sent_plans) == 1 and tg.sent_msgs == []
-    assert tg.sent_plans[0][0]["kind"] == "text"  # en-tête
+    assert tg.sent_plans[0][0]["kind"] == "text"  # header
 
 
 def test_run_text_sends_messages(monkeypatch):
@@ -91,7 +91,7 @@ def test_run_text_sends_messages(monkeypatch):
 
 def test_run_text_flag_overrides_card_config(monkeypatch):
     _patch(monkeypatch, [_rel()])
-    rt.run(_cfg(style="card"), _args(text=True))  # --text l'emporte sur style=card
+    rt.run(_cfg(style="card"), _args(text=True))  # --text overrides style=card
     tg = FakeTelegram.instances[0]
     assert tg.sent_msgs and tg.sent_plans == []
 
@@ -115,4 +115,4 @@ def test_run_dry_run_does_not_save_history(monkeypatch, tmp_path):
     monkeypatch.setattr(rt.history, "save", lambda p, keys: calls.append(keys))
     cfg = _cfg(style="card", use_history=True, history_file=str(tmp_path / "h.json"))
     rt.run(cfg, _args(dry_run=True, ignore_history=False))
-    assert calls == []  # aucun save en dry-run
+    assert calls == []  # no save in dry-run

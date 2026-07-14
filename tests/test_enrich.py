@@ -1,4 +1,4 @@
-"""Tests de l'enrichissement : liens *arr, imdb, trailer, ciné, RT — parallélisé."""
+"""Enrichment tests: *arr links, IMDb, trailer, cinema, RT - parallelized."""
 import sys
 import threading
 from pathlib import Path
@@ -19,7 +19,7 @@ def mk(mt, tid, source="Netflix (FR)", title=None):
 
 
 class FakeClient:
-    """Client TMDB minimal : valeurs déterministes + journal des appels."""
+    """Minimal TMDB client: deterministic values plus call log."""
 
     def __init__(self, ext=None, trailer="vid"):
         self.ext = ext or {}
@@ -38,7 +38,7 @@ class FakeClient:
         return dict(self.ext)
 
 
-# Config qui n'active QUE le champ testé (trailers coupé par défaut).
+# Config that enables ONLY the field under test (trailers off by default).
 def _cfg(**kw):
     base = {"trailers": False, "cinema_search_url": ""}
     base.update(kw)
@@ -53,14 +53,14 @@ def test_enrich_noop_when_nothing_configured():
 
 def test_enrich_sets_radarr_trailer_and_cinema():
     client = FakeClient(trailer="abc")
-    m = mk("movie", 5, source="Cinéma (FR)")  # is_cinema -> cinema_url
+    m = mk("movie", 5, source="Cinema (FR)")  # is_cinema -> cinema_url
     cfg = _cfg(radarr_url="http://r:7878/", trailers=True,
                cinema_search_url="https://cine/?q={query}")
     rt.enrich(client, {"films": [m]}, cfg, want_imdb=False)
     assert m.arr_url == "http://r:7878/add/new?term=tmdb:5"
     assert m.trailer_url == "https://youtu.be/abc"
     assert m.cinema_url == "https://cine/?q=T5"
-    # film + radarr sans omdb/want_imdb : pas besoin d'external_ids
+    # movie + Radarr without omdb/want_imdb: no external_ids needed
     assert ("ext", 5) not in client.calls
     assert m.imdb_id == ""
 
@@ -70,13 +70,13 @@ def test_enrich_tv_sonarr_uses_tvdb():
     t = mk("tv", 7)
     cfg = _cfg(sonarr_url="http://s:8989")
     rt.enrich(client, {"series": [t]}, cfg, want_imdb=False)
-    assert t.arr_url == "http://s:8989/add/new?term=tvdb%3A99"  # quote() encode ':'
+    assert t.arr_url == "http://s:8989/add/new?term=tvdb%3A99"  # quote() encodes ':'
     assert t.imdb_id == "tt1"
     assert ("ext", 7) in client.calls
 
 
 def test_enrich_tv_sonarr_falls_back_to_title_without_tvdb():
-    client = FakeClient(ext={})  # pas de tvdb_id
+    client = FakeClient(ext={})  # no tvdb_id
     t = mk("tv", 7, title="Mon Show")
     rt.enrich(client, {"series": [t]}, _cfg(sonarr_url="http://s:8989"), want_imdb=False)
     assert t.arr_url == "http://s:8989/add/new?term=Mon%20Show"
@@ -117,8 +117,8 @@ def test_enrich_processes_every_item():
 
 
 def test_enrich_runs_in_parallel():
-    """Preuve de parallélisme : N threads doivent atteindre la barrière
-    simultanément, sinon barrier.wait() lève BrokenBarrierError (timeout)."""
+    """Parallelism proof: N threads must reach the barrier simultaneously,
+    otherwise barrier.wait() raises BrokenBarrierError (timeout)."""
     n = 4
     barrier = threading.Barrier(n, timeout=5)
 
@@ -132,7 +132,7 @@ def test_enrich_runs_in_parallel():
             with self._lock:
                 self._active += 1
                 self.max_active = max(self.max_active, self._active)
-            barrier.wait()  # bloque jusqu'à n threads simultanés
+            barrier.wait()  # block until n threads are simultaneous
             with self._lock:
                 self._active -= 1
             return None
@@ -144,4 +144,4 @@ def test_enrich_runs_in_parallel():
     rels = [mk("movie", i) for i in range(n)]
     cfg = _cfg(trailers=True, enrich_workers=n)
     rt.enrich(client, {"films": rels}, cfg, want_imdb=False)
-    assert client.max_active == n  # les n titres traités en parallèle
+    assert client.max_active == n  # the n titles were processed in parallel

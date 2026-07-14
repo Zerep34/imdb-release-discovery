@@ -1,4 +1,4 @@
-"""Tests du dédoublonnage : fusion (media_type, tmdb_id) + agrégation sources."""
+"""Deduplication tests: merge on (media_type, tmdb_id) + source aggregation."""
 import sys
 from pathlib import Path
 
@@ -10,9 +10,9 @@ from tmdb import Release, _pick_season_premiere  # noqa: E402
 
 def test_season_premiere_picks_in_window():
     seasons = [
-        {"season_number": 0, "air_date": "2026-07-09"},  # spéciaux, ignoré
-        {"season_number": 1, "air_date": "2024-01-01"},  # hors fenêtre
-        {"season_number": 2, "air_date": "2026-07-09"},  # dans fenêtre
+        {"season_number": 0, "air_date": "2026-07-09"},  # specials, ignored
+        {"season_number": 1, "air_date": "2024-01-01"},  # outside the window
+        {"season_number": 2, "air_date": "2026-07-09"},  # inside the window
     ]
     p = _pick_season_premiere(seasons, "2026-07-08", "2026-07-14")
     assert p == {"season_number": 2, "air_date": "2026-07-09"}
@@ -43,12 +43,12 @@ def mk(mt, tid, source, pop=1.0, va=0.0, vc=0):
 def test_merges_same_id_across_platforms():
     out = dedup([
         mk("movie", 10, "Netflix (FR)", pop=5.0, va=6.0, vc=100),
-        mk("movie", 10, "Cinéma (FR)", pop=8.0, va=7.0, vc=250),
+        mk("movie", 10, "Cinema (FR)", pop=8.0, va=7.0, vc=250),
     ])
     assert len(out) == 1
     rel = out[0]
-    assert rel.sources == {"Netflix (FR)", "Cinéma (FR)"}
-    # agrégats : max conservé
+    assert rel.sources == {"Netflix (FR)", "Cinema (FR)"}
+    # aggregates: keep the max
     assert rel.popularity == 8.0
     assert rel.vote_average == 7.0
     assert rel.vote_count == 250
@@ -76,9 +76,9 @@ def _with_date(d):
 
 def test_in_window_filters_old_and_future():
     ws, we = "2026-07-13", "2026-07-19"
-    assert _in_window(_with_date("2026-07-15"), ws, we) is True   # dedans
-    assert _in_window(_with_date("2026-07-13"), ws, we) is True   # borne basse
-    assert _in_window(_with_date("2026-07-19"), ws, we) is True   # borne haute
-    assert _in_window(_with_date("1990-01-01"), ws, we) is False  # ressortie
-    assert _in_window(_with_date("2026-07-20"), ws, we) is False  # semaine suivante
-    assert _in_window(_with_date(""), ws, we) is False            # date inconnue
+    assert _in_window(_with_date("2026-07-15"), ws, we) is True   # inside
+    assert _in_window(_with_date("2026-07-13"), ws, we) is True   # lower bound
+    assert _in_window(_with_date("2026-07-19"), ws, we) is True   # upper bound
+    assert _in_window(_with_date("1990-01-01"), ws, we) is False  # re-release
+    assert _in_window(_with_date("2026-07-20"), ws, we) is False  # next week
+    assert _in_window(_with_date(""), ws, we) is False            # unknown date

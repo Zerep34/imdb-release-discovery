@@ -1,4 +1,4 @@
-"""Tests de la mémoire anti-répétition (history.py)."""
+"""Tests for duplicate-avoidance memory (history.py)."""
 import sys
 from pathlib import Path
 
@@ -16,7 +16,7 @@ def mk(mt, tid, date="2026-07-15"):
 
 def test_rel_key_includes_date_distinguishes_seasons():
     s1 = mk("tv", 10, "2024-01-01")
-    s2 = mk("tv", 10, "2026-07-09")   # même show, saison différente
+    s2 = mk("tv", 10, "2026-07-09")   # same show, different season
     assert history.rel_key(s1) != history.rel_key(s2)
 
 

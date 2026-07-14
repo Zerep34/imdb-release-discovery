@@ -1,7 +1,7 @@
-"""Client OMDb minimal : récupère la note Rotten Tomatoes via l'IMDb id.
+"""Minimal OMDb client: fetch Rotten Tomatoes scores via IMDb IDs.
 
-TMDB n'expose pas Rotten Tomatoes ; OMDb (omdbapi.com) le fournit dans son
-tableau `Ratings`. Clé gratuite requise (env OMDB_API_KEY ou config omdb_api_key).
+TMDB does not expose Rotten Tomatoes; OMDb (omdbapi.com) provides it in its
+`Ratings` table. A free key is required (env OMDB_API_KEY or config omdb_api_key).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import requests
 
 log = logging.getLogger(__name__)
 
-# NB : la clé OMDb gratuite ne fonctionne qu'en HTTP (HTTPS = tier payant).
+# Note: the free OMDb key only works over HTTP (HTTPS is paid).
 OMDB_URL = "http://www.omdbapi.com/"
 TIMEOUT = 20
 MAX_RETRIES = 3
@@ -24,7 +24,7 @@ class OMDbClient:
         self.session = requests.Session()
 
     def rt_score(self, imdb_id: str) -> int | None:
-        """Tomatometer (0-100) pour un imdb_id, ou None si indisponible."""
+        """Tomatometer (0-100) for an IMDb ID, or None if unavailable."""
         if not imdb_id:
             return None
         resp = None
@@ -38,7 +38,7 @@ class OMDbClient:
                 break
             except requests.RequestException as exc:
                 if attempt == MAX_RETRIES:
-                    log.warning("OMDb %s: abandon après %d essais (%s)", imdb_id, MAX_RETRIES, exc)
+                    log.warning("OMDb %s: aborted after %d attempts (%s)", imdb_id, MAX_RETRIES, exc)
                     return None
                 time.sleep(min(2 ** attempt, 8))
         if resp is None or not resp.ok:

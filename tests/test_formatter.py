@@ -1,4 +1,4 @@
-"""Tests du formatage : classement genre 16, découpage <4096, cas vide."""
+"""Formatting tests: genre 16 grouping, <4096 splitting, empty-case handling."""
 import sys
 from datetime import date
 from pathlib import Path
@@ -24,10 +24,10 @@ def mk(mt, tid, genres=(), pop=1.0, va=0.0, vc=0, title=None):
 
 def test_category_classification():
     rels = [
-        mk("movie", 1),               # film
+        mk("movie", 1),               # movie
         mk("movie", 2, genres=(16,)),  # animation
-        mk("tv", 3),                  # série
-        mk("tv", 4, genres=(16,)),     # série d'animation
+        mk("tv", 3),                  # series
+        mk("tv", 4, genres=(16,)),     # animated series
     ]
     b = fmt.classify(rels, CATS, max_items=15)
     assert [r.tmdb_id for r in b["films"]] == [1]
@@ -64,8 +64,8 @@ def test_empty_message():
     b = fmt.classify([], CATS, max_items=15)
     msgs = fmt.build_messages(b, WS, WE, CATS)
     assert len(msgs) == 1
-    assert "Aucune sortie" in msgs[0]
-    assert "13 juillet 2026" in msgs[0]
+    assert "No releases" in msgs[0]
+    assert "13 July 2026" in msgs[0]
 
 
 def test_html_escaping_and_link():
@@ -82,13 +82,13 @@ def test_arr_button_and_text_link():
     movie.arr_url = "http://192.168.1.1:7878/add/new?term=tmdb:5"
     tv = mk("tv", 6)
     tv.arr_url = "http://192.168.1.1:8989/add/new?term=tvdb:99"
-    # bouton inline (card)
+    # inline button (card)
     bm = fmt.arr_button(movie)
     assert bm == {"text": "➕ Radarr", "url": movie.arr_url}
     assert fmt.arr_button(tv)["text"] == "➕ Sonarr"
-    # la carte ne contient plus le lien arr en texte
+    # the card no longer contains the arr link as plain text
     assert "➕" not in fmt.card_text(movie, "films")
-    # le mode texte groupé garde le lien en ligne
+    # grouped text mode keeps the link inline
     assert "➕ Radarr" in fmt._format_line(movie)
 
 
@@ -111,8 +111,8 @@ def test_trailer_button_and_order():
     m.trailer_url = "https://www.youtube.com/watch?v=abc"
     m.arr_url = "http://192.168.1.1:7878/add/new?term=tmdb:5"
     btns = fmt.item_buttons(m)
-    # bande-annonce d'abord, ajout ensuite
-    assert [b["text"] for b in btns] == ["🎞 BA", "➕ Radarr"]
+    # trailer first, add link second
+    assert [b["text"] for b in btns] == ["🎞 Trailer", "➕ Radarr"]
     assert fmt.trailer_button(m)["url"] == "https://www.youtube.com/watch?v=abc"
 
 
@@ -145,7 +145,7 @@ def test_card_uses_imdb_url_as_first_link():
     m.imdb_id = "tt31728330"
     m.rt_score = 78
     txt = fmt.card_text(m, "films")
-    # lien invisible IMDb en tête (Telegram déplie cette carte)
+    # invisible IMDb link at the top (Telegram expands this card)
     assert 'href="https://www.imdb.com/title/tt31728330/"' in txt
     assert txt.startswith('<a href="https://www.imdb.com/title/tt31728330/">')
     assert "🎬 Film" in txt
@@ -163,49 +163,49 @@ def test_card_plan_one_message_per_release_with_preview():
     plan = fmt.build_card_plan(b, WS, WE, ["films", "series"])
     cards = [a for a in plan if a.get("preview")]
     assert len(cards) == 2
-    assert plan[0]["kind"] == "text" and "Sorties du" in plan[0]["text"]
+    assert plan[0]["kind"] == "text" and "Releases from" in plan[0]["text"]
 
 
 def test_card_plan_empty():
     b = fmt.classify([], CATS, max_items=15)
     plan = fmt.build_card_plan(b, WS, WE, CATS)
-    assert len(plan) == 1 and "Aucune sortie" in plan[0]["text"]
+    assert len(plan) == 1 and "No releases" in plan[0]["text"]
 
 
 def _cine(mt, tid, **kw):
     r = mk(mt, tid, **kw)
-    r.sources = {"Cinéma (FR)"}
+    r.sources = {"Cinema (FR)"}
     return r
 
 
 def test_cinema_label_and_emoji():
     c = _cine("movie", 1)
-    assert fmt.label_for(c, "films") == ("🍿", "Au cinéma")
-    assert fmt.label_for(c, "animation") == ("🍿", "Animation au cinéma")
-    # streaming garde le label normal
+    assert fmt.label_for(c, "films") == ("🍿", "At the cinema")
+    assert fmt.label_for(c, "animation") == ("🍿", "Animation at the cinema")
+    # streaming keeps the normal label
     assert fmt.label_for(mk("movie", 2), "films") == ("🎬", "Film")
 
 
 def test_cinema_highlighted_in_card_and_line():
     c = _cine("movie", 1)
-    assert "🍿 Au cinéma" in fmt.card_text(c, "films")
+    assert "🍿 At the cinema" in fmt.card_text(c, "films")
     assert fmt._format_line(c).startswith("🍿 ")
-    # streaming = puce normale
+    # streaming = normal bullet
     assert fmt._format_line(mk("movie", 2)).startswith("• ")
 
 
 def test_cinema_sorted_first():
-    stream = mk("movie", 1, pop=99.0)          # streaming très populaire
-    cine = _cine("movie", 2, pop=1.0)          # ciné peu populaire
+    stream = mk("movie", 1, pop=99.0)          # very popular streaming title
+    cine = _cine("movie", 2, pop=1.0)          # less popular cinema title
     b = fmt.classify([stream, cine], ["films"], max_items=15)
-    assert [r.tmdb_id for r in b["films"]] == [2, 1]  # ciné en tête malgré popularité
+    assert [r.tmdb_id for r in b["films"]] == [2, 1]  # cinema first despite popularity
 
 
 def test_cinema_button_only_for_cinema():
     c = _cine("movie", 1)
     c.cinema_url = "https://www.allocine.fr/rechercher/?q=Superman"
     assert fmt.cinema_button(c, "UGC") == {"text": "🎟 UGC", "url": c.cinema_url}
-    # pas d'URL ciné -> pas de bouton
+    # no cinema URL -> no button
     assert fmt.cinema_button(mk("movie", 2)) is None
 
 
@@ -214,12 +214,12 @@ def test_item_buttons_order_cinema_first():
     c.cinema_url = "https://allocine/x"
     c.trailer_url = "https://youtu.be/x"
     c.arr_url = "http://192.168.1.1:7878/add/new?term=tmdb:1"
-    labels = [b["text"] for b in fmt.item_buttons(c, "Séances")]
-    assert labels == ["🎟 Séances", "🎞 BA", "➕ Radarr"]
+    labels = [b["text"] for b in fmt.item_buttons(c, "Showtimes")]
+    assert labels == ["🎟 Showtimes", "🎞 Trailer", "➕ Radarr"]
 
 
 def test_chunking_under_limit_no_broken_tags():
-    # beaucoup d'items pour forcer plusieurs messages
+    # many items to force multiple messages
     rels = [mk("movie", i, pop=float(i), va=6.0, title=f"Titre {i} " * 5)
             for i in range(1, 400)]
     b = fmt.classify(rels, ["films"], max_items=1000)
@@ -227,6 +227,6 @@ def test_chunking_under_limit_no_broken_tags():
     assert len(msgs) > 1
     for m in msgs:
         assert len(m) <= fmt.TELEGRAM_LIMIT
-        # pas de balise <a coupée : autant d'ouvertures que de fermetures
+        # no cut <a tag: as many openings as closings
         assert m.count("<a ") == m.count("</a>")
         assert m.count("<b>") == m.count("</b>")

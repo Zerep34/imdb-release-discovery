@@ -1,4 +1,4 @@
-"""Client TMDB v3 : requêtes de découverte + parsing en objets Release."""
+"""TMDB v3 client: discovery requests and parsing into Release objects."""
 from __future__ import annotations
 
 import logging
@@ -12,29 +12,29 @@ import requests
 log = logging.getLogger(__name__)
 
 TMDB_BASE = "https://api.themoviedb.org/3"
-ANIMATION_GENRE_ID = 16  # même id pour films et séries
+ANIMATION_GENRE_ID = 16  # same ID for movies and series
 TIMEOUT = 15
 MAX_RETRIES = 4
 
 
 @dataclass
 class Release:
-    """Un titre (film ou série) sorti dans la fenêtre visée."""
+    """A title (movie or series) released inside the target window."""
 
     media_type: str          # "movie" | "tv"
     tmdb_id: int
     title: str
-    release_date: str        # ISO "2026-07-15" ou "" si inconnue
-    year: str                # "2026" ou "" si inconnu
+    release_date: str        # ISO "2026-07-15" or "" if unknown
+    year: str                # "2026" or "" if unknown
     popularity: float
     vote_average: float
     vote_count: int
     genre_ids: tuple[int, ...]
-    arr_url: str = ""        # lien d'ajout Radarr/Sonarr (rempli après coup)
-    cinema_url: str = ""     # lien recherche séances (sorties ciné, rempli après coup)
-    imdb_id: str = ""        # "tt1234567" (rempli après coup, pour la carte IMDb)
-    trailer_url: str = ""    # URL YouTube du trailer (rempli après coup)
-    rt_score: int | None = None  # Tomatometer Rotten Tomatoes (via OMDb)
+    arr_url: str = ""        # Radarr/Sonarr add link (filled in later)
+    cinema_url: str = ""     # cinema showtimes search link (filled in later)
+    imdb_id: str = ""        # "tt1234567" (filled in later, for the IMDb card)
+    trailer_url: str = ""    # YouTube trailer URL (filled in later)
+    rt_score: int | None = None  # Rotten Tomatoes Tomatometer (via OMDb)
     sources: set[str] = field(default_factory=set)
 
     @property
@@ -43,7 +43,7 @@ class Release:
 
     @property
     def is_cinema(self) -> bool:
-        return any(s.startswith("Cinéma") for s in self.sources)
+        return any(s.startswith("Cinema") for s in self.sources)
 
     @property
     def imdb_url(self) -> str:
@@ -51,7 +51,7 @@ class Release:
 
     @property
     def card_url(self) -> str:
-        """URL dont Telegram déplie l'aperçu (carte) : IMDb sinon TMDB."""
+        """URL whose preview Telegram expands (card): IMDb first, otherwise TMDB."""
         return self.imdb_url or self.tmdb_url
 
     @property
@@ -96,7 +96,7 @@ def _parse_tv(raw: dict, source: str) -> Release:
 
 
 class TMDBError(Exception):
-    """Erreur réseau ou API TMDB (mène au code de sortie 2)."""
+    """TMDB network or API error (leads to exit code 2)."""
 
 
 class TMDBClient:
@@ -106,7 +106,7 @@ class TMDBClient:
         self.max_pages = max(1, max_pages)
         self.session = requests.Session()
 
-    # --- requête bas niveau avec retries/backoff -------------------------
+    # --- low-level request with retries/backoff -------------------------
     def _get(self, path: str, params: dict) -> dict:
         params = {"api_key": self.api_key, "language": self.language, **params}
         url = f"{TMDB_BASE}{path}"
@@ -115,36 +115,36 @@ class TMDBClient:
                 resp = self.session.get(url, params=params, timeout=TIMEOUT)
             except requests.RequestException as exc:
                 if attempt == MAX_RETRIES:
-                    raise TMDBError(f"Échec réseau sur {path}: {exc}") from exc
+                    raise TMDBError(f"Network failure on {path}: {exc}") from exc
                 self._backoff(attempt)
                 continue
 
             if resp.status_code == 429:
                 wait = int(resp.headers.get("Retry-After", "1"))
-                log.warning("TMDB 429, attente %ss", wait)
+                log.warning("TMDB 429, waiting %ss", wait)
                 time.sleep(wait)
                 continue
             if resp.status_code == 401:
-                raise TMDBError("Clé API TMDB invalide (401).")
+                raise TMDBError("Invalid TMDB API key (401).")
             if resp.status_code >= 500 and attempt < MAX_RETRIES:
                 self._backoff(attempt)
                 continue
             if not resp.ok:
-                raise TMDBError(f"TMDB {resp.status_code} sur {path}: {resp.text[:200]}")
+                raise TMDBError(f"TMDB {resp.status_code} on {path}: {resp.text[:200]}")
             return resp.json()
-        raise TMDBError(f"Abandon après {MAX_RETRIES} tentatives sur {path}")
+        raise TMDBError(f"Aborted after {MAX_RETRIES} attempts on {path}")
 
     @staticmethod
     def _backoff(attempt: int) -> None:
         time.sleep(min(2 ** attempt, 10))
 
-    # --- validation identifiants (--check) -------------------------------
+    # --- credential validation (--check) -------------------------------
     def get_configuration(self) -> dict:
         return self._get("/configuration", {})
 
-    # --- bande-annonce (Trailer YouTube) --------------------------------
+    # --- trailer (YouTube trailer) --------------------------------------
     def get_trailer_url(self, media_type: str, tmdb_id: int) -> str | None:
-        """URL YouTube du meilleur trailer, ou None. Essaie langue puis en-US."""
+        """YouTube URL for the best trailer, or None. Tries the language, then en-US."""
         langs = [self.language] + ([] if self.language == "en-US" else ["en-US"])
         for lang in langs:
             try:
@@ -157,21 +157,21 @@ class TMDBClient:
                 return f"https://www.youtube.com/watch?v={key}"
         return None
 
-    # --- ids externes (tvdb pour Sonarr, imdb pour OMDb/Rotten Tomatoes) -
+    # --- external IDs (tvdb for Sonarr, imdb for OMDb/Rotten Tomatoes) ---
     def get_external_ids(self, media_type: str, tmdb_id: int) -> dict:
-        """Retourne {tvdb_id, imdb_id, ...} ou {} en cas d'erreur."""
+        """Return {tvdb_id, imdb_id, ...} or {} on error."""
         try:
             return self._get(f"/{media_type}/{tmdb_id}/external_ids", {})
         except TMDBError as exc:
             log.warning("external_ids %s=%s: %s", media_type, tmdb_id, exc)
             return {}
 
-    # --- résolution dynamique des plateformes ----------------------------
+    # --- dynamic platform resolution ------------------------------------
     def resolve_providers(self, media: str, region: str, names: Iterable[str]) -> dict[str, int]:
-        """Mappe des noms de plateformes -> ids TMDB pour une région donnée.
+        """Map platform names to TMDB IDs for a given region.
 
-        media : "movie" | "tv". Matching tolérant : casse, espaces, accents,
-        ponctuation, et équivalence "+" <-> "plus". Fallback sous-chaîne.
+        media: "movie" | "tv". Tolerant matching: case, spaces, accents,
+        punctuation, and "+" <-> "plus" equivalence. Substring fallback.
         """
         data = self._get(f"/watch/providers/{media}", {"watch_region": region})
         catalog = [
@@ -185,23 +185,23 @@ class TMDBClient:
             want = _norm(name)
             pid = by_name.get(want)
             if pid is None:
-                # fallback : correspondance par sous-chaîne (ex. "Apple TV" ~ "Apple TV+")
+                # fallback: substring match (e.g. "Apple TV" ~ "Apple TV+")
                 matches = [(raw, pid_) for norm, raw, pid_ in catalog
                            if want and (want in norm or norm in want)]
                 if len(matches) == 1:
                     pid = matches[0][1]
-                    log.info("Plateforme %r résolue en %r (%s/%s)",
+                    log.info("Platform %r resolved as %r (%s/%s)",
                              name, matches[0][0], media, region)
                 elif len(matches) > 1:
-                    log.warning("Plateforme %r ambiguë (%s/%s) : %s — précisez le nom exact",
+                    log.warning("Platform %r is ambiguous (%s/%s): %s — please use the exact name",
                                 name, media, region, ", ".join(m[0] for m in matches))
             if pid is not None:
                 resolved[name] = pid
             else:
-                log.warning("Plateforme introuvable pour %s/%s: %r", media, region, name)
+                log.warning("Platform not found for %s/%s: %r", media, region, name)
         return resolved
 
-    # --- pagination générique -------------------------------------------
+    # --- generic pagination -------------------------------------------
     def _discover(self, path: str, params: dict, source: str, parser) -> list[Release]:
         out: list[Release] = []
         for page in range(1, self.max_pages + 1):
@@ -213,7 +213,7 @@ class TMDBClient:
                 break
         return out
 
-    # --- cinéma ----------------------------------------------------------
+    # --- cinema ----------------------------------------------------------
     def discover_cinema(self, region: str, week_start: str, week_end: str) -> list[Release]:
         params = {
             "region": region,
@@ -222,9 +222,9 @@ class TMDBClient:
             "release_date.lte": week_end,
             "sort_by": "popularity.desc",
         }
-        return self._discover("/discover/movie", params, f"Cinéma ({region})", _parse_movie)
+        return self._discover("/discover/movie", params, f"Cinema ({region})", _parse_movie)
 
-    # --- streaming films -------------------------------------------------
+    # --- streaming movies -------------------------------------------------
     def discover_stream_movies(
         self, region: str, provider_ids: list[int], source: str,
         week_start: str, week_end: str,
@@ -239,13 +239,13 @@ class TMDBClient:
         }
         return self._discover("/discover/movie", params, source, _parse_movie)
 
-    # --- streaming séries ------------------------------------------------
+    # --- streaming series ------------------------------------------------
     def discover_stream_tv(
         self, region: str, provider_ids: list[int], source: str,
         week_start: str, week_end: str, date_basis: str = "first_air",
     ) -> list[Release]:
-        """date_basis : 'first_air' (premières de série S1) ou 'air'
-        (tout show diffusant un épisode dans la fenêtre)."""
+        """date_basis: 'first_air' (S1 premieres) or 'air'
+        (any show airing an episode in the window)."""
         field = "air_date" if date_basis == "air" else "first_air_date"
         params = {
             "watch_region": region,
@@ -257,22 +257,22 @@ class TMDBClient:
         }
         return self._discover("/discover/tv", params, source, _parse_tv)
 
-    # --- première de saison (pour capter S2/S3) --------------------------
+    # --- season premiere (to catch S2/S3) --------------------------
     def get_season_premiere(self, tv_id: int, week_start: str, week_end: str) -> dict | None:
-        """Retourne {season_number, air_date} si une saison premiere dans la
-        fenêtre, sinon None. Utilise /tv/{id} (liste des saisons)."""
+        """Return {season_number, air_date} if a season premiere falls in the
+        window, otherwise None. Uses /tv/{id} (season list)."""
         try:
             data = self._get(f"/tv/{tv_id}", {})
         except TMDBError as exc:
-            log.warning("détails tv=%s: %s", tv_id, exc)
+                log.warning("tv details=%s: %s", tv_id, exc)
             return None
         return _pick_season_premiere(data.get("seasons", []), week_start, week_end)
 
 
 def _pick_season_premiere(seasons: list[dict], week_start: str, week_end: str) -> dict | None:
-    """Meilleure saison dont la date de première tombe dans la fenêtre.
+    """Best season whose premiere date falls in the window.
 
-    Ignore la saison 0 (spéciaux). En cas de plusieurs, garde le n° le plus élevé.
+    Ignores season 0 (specials). If multiple candidates exist, keep the highest season number.
     """
     best = None
     for s in seasons:
@@ -286,7 +286,7 @@ def _pick_season_premiere(seasons: list[dict], week_start: str, week_end: str) -
 
 
 def _pick_trailer(results: list[dict]) -> str | None:
-    """Choisit la meilleure clé vidéo YouTube : Trailer officiel > Trailer > Teaser."""
+    """Choose the best YouTube video key: Official Trailer > Trailer > Teaser."""
     yt = [v for v in results if v.get("site") == "YouTube" and v.get("key")]
     for pred in (
         lambda v: v.get("type") == "Trailer" and v.get("official"),
@@ -300,8 +300,8 @@ def _pick_trailer(results: list[dict]) -> str | None:
 
 
 def _norm(s: str) -> str:
-    """Normalise un nom de plateforme pour comparaison tolérante."""
+    """Normalize a platform name for tolerant comparison."""
     s = unicodedata.normalize("NFKD", s.lower())
-    s = "".join(c for c in s if not unicodedata.combining(c))  # retire accents
+    s = "".join(c for c in s if not unicodedata.combining(c))  # remove accents
     s = s.replace("+", "plus").replace("&", "and")
-    return "".join(c for c in s if c.isalnum())  # ne garde que alphanumérique
+    return "".join(c for c in s if c.isalnum())  # keep alphanumeric only

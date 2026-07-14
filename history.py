@@ -1,9 +1,9 @@
-"""Mémoire des titres déjà postés, pour éviter les répétitions d'une semaine
-sur l'autre (un film en salle plusieurs semaines n'est posté qu'une fois).
+"""Memory of already-posted titles, used to avoid weekly duplicates
+(a cinema release running for several weeks is only posted once).
 
-État : petit fichier JSON local (liste de clés). Clé d'un titre :
-`media_type:tmdb_id:release_date` — la date distingue les saisons (S2/S3 d'un
-même show ont un tmdb_id identique mais une date de première différente).
+State: a small local JSON file (list of keys). A title key is:
+`media_type:tmdb_id:release_date` - the date distinguishes seasons (S2/S3 of
+the same show share a tmdb_id but have different premiere dates).
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def load(path: Path) -> set[str]:
         data = json.loads(path.read_text(encoding="utf-8"))
         return set(data.get("sent", []))
     except (json.JSONDecodeError, OSError) as exc:
-        log.warning("Historique illisible (%s), on repart de zéro", exc)
+        log.warning("Unreadable history (%s), starting from scratch", exc)
         return set()
 
 
@@ -37,9 +37,9 @@ def save(path: Path, keys: set[str]) -> None:
 
 
 def prune(buckets: dict[str, list[Release]], seen: set[str]) -> list[str]:
-    """Retire des buckets les titres déjà postés (présents dans `seen`).
+    """Remove titles already posted (present in `seen`) from the buckets.
 
-    Retourne les clés des titres conservés (= nouveaux, à mémoriser après envoi).
+    Returns the keys for the titles kept (new titles to remember after sending).
     """
     kept: list[str] = []
     for cat, rels in buckets.items():

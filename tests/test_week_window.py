@@ -1,4 +1,4 @@
-"""Tests de la fenêtre : semaine de 7 jours ancrée (défaut mercredi=2)."""
+"""Week-window tests: anchored 7-day week (default Wednesday=2)."""
 import sys
 from datetime import date
 from pathlib import Path
@@ -9,10 +9,10 @@ from releases_to_telegram import week_window  # noqa: E402
 
 
 def test_current_default_wednesday_anchor():
-    # samedi 11 juillet 2026 -> semaine mercredi 08 -> mardi 14
+    # Saturday July 11, 2026 -> Wednesday July 8 -> Tuesday July 14
     start, end = week_window("current", "Europe/Paris", today=date(2026, 7, 11))
-    assert start == date(2026, 7, 8)    # mercredi
-    assert end == date(2026, 7, 14)     # mardi
+    assert start == date(2026, 7, 8)    # Wednesday
+    assert end == date(2026, 7, 14)     # Tuesday
     assert start.weekday() == 2
     assert end.weekday() == 1
 
@@ -45,14 +45,14 @@ def test_span_is_seven_days():
 
 
 def test_configurable_start_day_monday():
-    # start_day=0 -> lundi->dimanche
+    # start_day=0 -> Monday through Sunday
     start, end = week_window("current", "Europe/Paris",
                              today=date(2026, 7, 11), start_day=0)
-    assert start == date(2026, 7, 6)    # lundi
-    assert end == date(2026, 7, 12)     # dimanche
+    assert start == date(2026, 7, 6)    # Monday
+    assert end == date(2026, 7, 12)     # Sunday
 
 
 def test_default_today_uses_timezone():
     start, end = week_window("current", "Asia/Tokyo")
-    assert start.weekday() == 2   # mercredi
-    assert end.weekday() == 1     # mardi
+    assert start.weekday() == 2   # Wednesday
+    assert end.weekday() == 1     # Tuesday

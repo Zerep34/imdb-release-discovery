@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Point d'entrée CLI : sorties de la semaine (TMDB) -> canal Telegram.
+"""CLI entry point: weekly releases (TMDB) -> Telegram channel.
 
-Cross-platform (Windows / macOS / Linux). Aucun secret codé en dur :
-config par fichier JSON, variables d'environnement ou arguments CLI.
+Cross-platform (Windows / macOS / Linux). No hard-coded secrets:
+configuration via JSON file, environment variables, or CLI arguments.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ DEFAULTS = {
     "max_pages": 2,
     "week_start_day": 2,
     "style": "card",
-    "cinema_label": "Séances",
+    "cinema_label": "Showtimes",
     "cinema_search_url": "https://www.allocine.fr/rechercher/?q={query}",
     "use_history": True,
     "history_file": "sent_history.json",
@@ -51,16 +51,16 @@ DEFAULTS = {
 
 
 # --------------------------------------------------------------------------
-# Fenêtre de dates : semaine de 7 jours ancrée sur `start_day`, dans le fuseau.
-# start_day suit weekday() : lundi=0 ... mercredi=2 ... dimanche=6.
-# Par défaut mercredi (jour des sorties ciné en France) -> mercredi->mardi.
+# Date window: 7-day week anchored on `start_day`, in the configured time zone.
+# start_day follows weekday(): Monday=0 ... Wednesday=2 ... Sunday=6.
+# Default Wednesday (cinema release day in France) -> Wednesday through Tuesday.
 # --------------------------------------------------------------------------
 def week_window(when: str, tz_name: str, today: date | None = None,
                 start_day: int = 2) -> tuple[date, date]:
-    """Retourne (début, fin) de la semaine de 7 jours ancrée sur `start_day`.
+    """Return (start, end) for the 7-day week anchored on `start_day`.
 
-    when : "current" | "next" | "last". `today` sert aux tests ; sinon
-    calculé dans le fuseau `tz_name`.
+    when: "current" | "next" | "last". `today` is for tests; otherwise it is
+    computed in the `tz_name` time zone.
     """
     if today is None:
         today = datetime.now(ZoneInfo(tz_name)).date()
@@ -71,13 +71,13 @@ def week_window(when: str, tz_name: str, today: date | None = None,
     elif when == "last":
         start -= timedelta(days=7)
     elif when != "current":
-        raise ValueError(f"Fenêtre inconnue: {when!r}")
+        raise ValueError(f"Unknown window: {when!r}")
     end = start + timedelta(days=6)
     return start, end
 
 
 # --------------------------------------------------------------------------
-# Dédoublonnage : fusion sur (media_type, tmdb_id), agrégation des sources.
+# Deduplication: merge on (media_type, tmdb_id), aggregate sources.
 # --------------------------------------------------------------------------
 def dedup(releases: list[Release]) -> list[Release]:
     merged: dict[tuple[str, int], Release] = {}
@@ -86,7 +86,7 @@ def dedup(releases: list[Release]) -> list[Release]:
         if key in merged:
             existing = merged[key]
             existing.sources |= rel.sources
-            # garder la popularité/note la plus élevée observée
+            # keep the highest observed popularity/rating
             existing.popularity = max(existing.popularity, rel.popularity)
             existing.vote_average = max(existing.vote_average, rel.vote_average)
             existing.vote_count = max(existing.vote_count, rel.vote_count)
@@ -102,7 +102,7 @@ def load_config(path: Path) -> dict:
     cfg = dict(DEFAULTS)
     if path.exists():
         cfg.update(json.loads(path.read_text(encoding="utf-8")))
-    # secrets via env (prioritaires sur le fichier)
+    # secrets via environment variables (take precedence over the file)
     for env_key, cfg_key in (
         ("TMDB_API_KEY", "tmdb_api_key"),
         ("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
@@ -123,20 +123,20 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
 
 
 def normalize_regions(regions: list[str]) -> list[str]:
-    """Vide ou ['ALL'] => monde (region vide côté TMDB)."""
+    """Empty or ['ALL'] => worldwide (blank region on the TMDB side)."""
     if not regions or [r.upper() for r in regions] == ["ALL"]:
-        return [""]  # "" = pas de filtre région
+        return [""]  # "" = no region filter
     return [r.upper() for r in regions]
 
 
 # --------------------------------------------------------------------------
-# Collecte
+# Collection
 # --------------------------------------------------------------------------
 def _in_window(rel: Release, ws: str, we: str) -> bool:
-    """Rejette tout titre dont la date de sortie sort de la fenêtre.
+    """Reject any title whose release date falls outside the window.
 
-    Filet de sécurité côté client : TMDB laisse parfois passer des ressorties
-    ou des titres au catalogue dont la date d'origine est ancienne.
+    Client-side safety net: TMDB sometimes surfaces re-releases or catalog
+    titles whose original date is old.
     """
     if not rel.release_date:
         return False
@@ -145,18 +145,18 @@ def _in_window(rel: Release, ws: str, we: str) -> bool:
 
 def _collect_returning_seasons(client: TMDBClient, region: str, provider_id: int,
                                source: str, ws: str, we: str) -> list[Release]:
-    """Premières de saison S2+ : candidats via air_date, filtrés sur une vraie
-    première de saison dans la fenêtre. Titre annoté « — Saison N »."""
+    """S2+ season premieres: candidates from air_date, filtered to real season
+    premieres inside the window. Title annotated with " - Season N"."""
     candidates = [
         rel for rel in client.discover_stream_tv(region, [provider_id], source, ws, we,
                                                   date_basis="air")
-        # S1 déjà couvert par la requête first_air_date
+        # S1 is already covered by the first_air_date query
         if not (rel.release_date and ws <= rel.release_date <= we)
     ]
     if not candidates:
         return []
 
-    # Un appel /tv/{id} par candidat : parallélisé (indépendants).
+    # One /tv/{id} call per candidate: parallelized because they are independent.
     out: list[Release] = []
     with ThreadPoolExecutor(max_workers=min(8, len(candidates))) as pool:
         futures = {pool.submit(client.get_season_premiere, rel.tmdb_id, ws, we): rel
@@ -166,7 +166,7 @@ def _collect_returning_seasons(client: TMDBClient, region: str, provider_id: int
             prem = fut.result()
             if prem and prem["season_number"] >= 2:
                 rel.release_date = prem["air_date"]
-                rel.year = prem["air_date"][:4]  # année de la saison, pas de la S1
+                rel.year = prem["air_date"][:4]  # season year, not S1 year
                 rel.title = f"{rel.title} — Saison {prem['season_number']}"
                 out.append(rel)
     return out
@@ -180,14 +180,14 @@ def collect(client: TMDBClient, cfg: dict, ws: str, we: str) -> list[Release]:
     for region in regions:
         region_label = region or "Monde"
 
-        # Cinéma
+        # Cinema
         if cfg.get("include_cinema", True):
-            log.info("Cinéma %s...", region_label)
+            log.info("Cinema %s...", region_label)
             for rel in client.discover_cinema(region or "", ws, we):
-                rel.sources = {f"Cinéma ({region_label})"}
+                rel.sources = {f"Cinema ({region_label})"}
                 all_rel.append(rel)
 
-        # Streaming : besoin d'une région pour with_watch_providers.
+        # Streaming: needs a region for with_watch_providers.
         if platforms and region:
             movie_ids = client.resolve_providers("movie", region, platforms)
             tv_ids = client.resolve_providers("tv", region, platforms)
@@ -197,37 +197,37 @@ def collect(client: TMDBClient, cfg: dict, ws: str, we: str) -> list[Release]:
                     all_rel += client.discover_stream_movies(
                         region, [movie_ids[name]], source, ws, we)
                 if name in tv_ids:
-                    # nouvelles séries (S1) : filtre first_air_date
+                    # new series (S1): filter first_air_date
                     all_rel += client.discover_stream_tv(
                         region, [tv_ids[name]], source, ws, we)
-                    # nouvelles saisons (S2/S3) : shows diffusant cette semaine
-                    # dont une première de saison tombe dans la fenêtre
+                    # new seasons (S2/S3): shows airing this week
+                    # whose season premiere falls inside the window
                     if cfg.get("include_returning_seasons", True):
                         all_rel += _collect_returning_seasons(
                             client, region, tv_ids[name], source, ws, we)
         elif platforms and not region:
-            log.warning("Streaming ignoré : régions=ALL sans région précise "
-                        "(TMDB exige watch_region).")
+            log.warning("Streaming skipped: regions=ALL without a specific region "
+                        "(TMDB requires watch_region).")
 
     in_window = [r for r in all_rel if _in_window(r, ws, we)]
     dropped = len(all_rel) - len(in_window)
     if dropped:
-        log.info("%d titre(s) hors fenêtre écarté(s)", dropped)
+        log.info("%d title(s) dropped for being outside the window", dropped)
     return dedup(in_window)
 
 
 # --------------------------------------------------------------------------
-# Commandes
+# Commands
 # --------------------------------------------------------------------------
 def _enrich_one(client: TMDBClient, rel: Release, *, radarr: str, sonarr: str,
                 omdb: OMDbClient | None, want_imdb: bool, trailers: bool,
                 cinema_tpl: str) -> None:
-    """Enrichit un seul Release (mute l'objet en place). Voir `enrich`."""
+    """Enrich a single Release (mutates the object in place). See `enrich`."""
     if trailers:
         rel.trailer_url = client.get_trailer_url(rel.media_type, rel.tmdb_id) or ""
     if cinema_tpl and rel.is_cinema:
         rel.cinema_url = cinema_tpl.replace("{query}", quote(rel.title))
-    # external_ids requis pour : imdb (carte/RT) ou tvdb (série+Sonarr).
+    # external_ids required for imdb (card/RT) or tvdb (series + Sonarr).
     need_ext = bool(omdb) or want_imdb or (rel.media_type == "tv" and sonarr)
     ext = client.get_external_ids(rel.media_type, rel.tmdb_id) if need_ext else {}
     rel.imdb_id = ext.get("imdb_id") or ""
@@ -244,15 +244,15 @@ def _enrich_one(client: TMDBClient, rel: Release, *, radarr: str, sonarr: str,
 
 
 def enrich(client: TMDBClient, buckets: dict, cfg: dict, want_imdb: bool = False) -> None:
-    """Enrichit chaque Release : lien Radarr/Sonarr + imdb_id + note Rotten Tomatoes.
+    """Enrich each Release: Radarr/Sonarr link + imdb_id + Rotten Tomatoes score.
 
     - Radarr : term=tmdb:<id> (exact).
-    - Sonarr : indexe par tvdbId -> résolu via external_ids (repli titre sinon).
-    - imdb_id : pour la carte IMDb (mode `card`) et Rotten Tomatoes.
-    - Rotten Tomatoes : imdb_id -> OMDb. Ignoré si pas de clé OMDb.
+    - Sonarr: indexes by tvdbId -> resolved via external_ids (title fallback otherwise).
+    - imdb_id: for the IMDb card (`card` mode) and Rotten Tomatoes.
+    - Rotten Tomatoes: imdb_id -> OMDb. Skipped if no OMDb key is provided.
 
-    Un seul appel external_ids par titre couvre tvdb + imdb. Chaque titre est
-    indépendant : les appels HTTP sont parallélisés (goulot du temps mur).
+    A single external_ids call per title covers tvdb + imdb. Each title is
+    independent: HTTP calls are parallelized (wall-clock bottleneck).
     """
     radarr = (cfg.get("radarr_url") or "").rstrip("/")
     sonarr = (cfg.get("sonarr_url") or "").rstrip("/")
@@ -276,7 +276,7 @@ def enrich(client: TMDBClient, buckets: dict, cfg: dict, want_imdb: bool = False
             for rel in rels
         ]
         for fut in as_completed(futures):
-            fut.result()  # propage toute exception inattendue
+            fut.result()  # propagate any unexpected exception
 
 
 def cmd_check(cfg: dict) -> int:
@@ -285,21 +285,21 @@ def cmd_check(cfg: dict) -> int:
         TMDBClient(cfg["tmdb_api_key"], cfg["language"]).get_configuration()
         print("TMDB : OK")
     except (TMDBError, KeyError) as exc:
-        print(f"TMDB : ÉCHEC — {exc}", file=sys.stderr)
+        print(f"TMDB: FAILURE - {exc}", file=sys.stderr)
         ok = False
     try:
         me = TelegramClient(cfg["telegram_bot_token"], cfg.get("telegram_chat_id", "")).get_me()
         print(f"Telegram : OK (@{me.get('username')})")
     except (TelegramError, KeyError) as exc:
-        print(f"Telegram : ÉCHEC — {exc}", file=sys.stderr)
+        print(f"Telegram: FAILURE - {exc}", file=sys.stderr)
         ok = False
     return EXIT_OK if ok else EXIT_CONFIG
 
 
 def resolve_style(cfg: dict, args: argparse.Namespace) -> str:
-    """Détermine le style d'envoi : 'card' | 'text'.
+    """Determine the delivery style: 'card' | 'text'.
 
-    Priorité : --text > cfg['style']. Défaut : 'card'.
+    Priority: --text > cfg['style']. Default: 'card'.
     """
     if args.text:
         return "text"
@@ -310,7 +310,7 @@ def resolve_style(cfg: dict, args: argparse.Namespace) -> str:
 def _dry_run_plan(plan: list[dict]) -> None:
     print(f"\n=== DRY-RUN (card) : {len(plan)} envoi(s) ===\n")
     for a in plan:
-        tag = " [aperçu]" if a.get("preview") else ""
+        tag = " [preview]" if a.get("preview") else ""
         print(f"{a['text']}{tag}")
         for b in a.get("buttons", []):
             print(f"   [🔘 {b['text']} -> {b['url']}]")
@@ -329,11 +329,11 @@ def run(cfg: dict, args: argparse.Namespace) -> int:
     ws_date, we_date = week_window(args.week, cfg["timezone"],
                                    start_day=cfg.get("week_start_day", 2))
     ws, we = ws_date.isoformat(), we_date.isoformat()
-    log.info("Fenêtre : %s -> %s", ws, we)
+    log.info("Window: %s -> %s", ws, we)
 
     client = TMDBClient(cfg["tmdb_api_key"], cfg["language"], cfg.get("max_pages", 2))
     releases = collect(client, cfg, ws, we)
-    log.info("%d titre(s) après dédoublonnage", len(releases))
+    log.info("%d title(s) after deduplication", len(releases))
 
     buckets = fmt.classify(
         releases,
@@ -342,7 +342,7 @@ def run(cfg: dict, args: argparse.Namespace) -> int:
         cfg.get("min_vote_count", 0),
         cfg.get("min_popularity", 0),
     )
-    # Mémoire anti-répétition : retire les titres déjà postés.
+    # Anti-duplicate memory: remove already-posted titles.
     hist_path = Path(cfg.get("history_file", "sent_history.json"))
     use_history = cfg.get("use_history", True) and not args.ignore_history
     seen: set[str] = set()
@@ -351,23 +351,23 @@ def run(cfg: dict, args: argparse.Namespace) -> int:
         total = sum(len(v) for v in buckets.values())
         seen = history.load(hist_path)
         kept = history.prune(buckets, seen)
-        log.info("Historique : %d nouveau(x), %d déjà vu(s) ignoré(s)",
+        log.info("History: %d new, %d already-seen ignored",
                  len(kept), total - len(kept))
 
     style = resolve_style(cfg, args)
-    log.info("Style de message : %s", style)
+    log.info("Message style: %s", style)
     enrich(client, buckets, cfg, want_imdb=(style == "card"))
 
-    # Construit le plan d'envoi selon le style, puis affiche (dry-run) ou envoie.
+    # Build the send plan according to the style, then print (dry-run) or send.
     if style == "card":
-        cinema_label = cfg.get("cinema_label", "Séances")
+        cinema_label = cfg.get("cinema_label", "Showtimes")
         plan = fmt.build_card_plan(buckets, ws_date, we_date, cfg["categories"], cinema_label)
         if args.dry_run:
             _dry_run_plan(plan)
             return EXIT_OK
         tg = TelegramClient(cfg["telegram_bot_token"], cfg["telegram_chat_id"])
         tg.send_plan(plan)
-        log.info("%d envoi(s) sur %s", len(plan), cfg["telegram_chat_id"])
+        log.info("%d send action(s) to %s", len(plan), cfg["telegram_chat_id"])
     else:
         messages = fmt.build_messages(buckets, ws_date, we_date, cfg["categories"])
         if args.dry_run:
@@ -375,7 +375,7 @@ def run(cfg: dict, args: argparse.Namespace) -> int:
             return EXIT_OK
         tg = TelegramClient(cfg["telegram_bot_token"], cfg["telegram_chat_id"])
         tg.send_all(messages)
-        log.info("%d message(s) envoyé(s) sur %s", len(messages), cfg["telegram_chat_id"])
+        log.info("%d message(s) sent to %s", len(messages), cfg["telegram_chat_id"])
 
     if use_history:
         history.save(hist_path, seen | set(kept))
@@ -386,18 +386,18 @@ def run(cfg: dict, args: argparse.Namespace) -> int:
 # CLI
 # --------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Sorties de la semaine -> Telegram")
-    p.add_argument("--config", default="config.json", help="Chemin du fichier de config")
-    p.add_argument("--regions", help="Surcharge des régions, ex: FR,US")
-    p.add_argument("--platforms", help='Surcharge des plateformes, ex: "Netflix,Max"')
+    p = argparse.ArgumentParser(description="Weekly releases -> Telegram")
+    p.add_argument("--config", default="config.json", help="Config file path")
+    p.add_argument("--regions", help="Override regions, e.g. FR,US")
+    p.add_argument("--platforms", help='Override platforms, e.g. "Netflix,Max"')
     p.add_argument("--week", choices=["current", "next", "last"], default="current")
     p.add_argument("--text", action="store_true",
-                   help="Force le mode texte groupé (au lieu du mode carte)")
+                   help="Force grouped text mode (instead of card mode)")
     p.add_argument("--ignore-history", action="store_true",
-                   help="Ne pas filtrer les titres déjà postés (n'écrit pas l'historique en dry-run)")
-    p.add_argument("--dry-run", action="store_true", help="Affiche sans envoyer")
-    p.add_argument("--check", action="store_true", help="Valide les identifiants puis quitte")
-    p.add_argument("--verbose", action="store_true", help="Logs détaillés")
+                   help="Do not filter already-posted titles (does not write history in dry-run)")
+    p.add_argument("--dry-run", action="store_true", help="Print without sending")
+    p.add_argument("--check", action="store_true", help="Validate credentials and exit")
+    p.add_argument("--verbose", action="store_true", help="Verbose logs")
     return p
 
 
@@ -412,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = apply_cli_overrides(cfg, args)
 
     if not cfg.get("tmdb_api_key") or not cfg.get("telegram_bot_token"):
-        log.error("Config incomplète : tmdb_api_key et telegram_bot_token requis.")
+        log.error("Incomplete config: tmdb_api_key and telegram_bot_token are required.")
         return EXIT_CONFIG
 
     try:
@@ -420,10 +420,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_check(cfg)
         return run(cfg, args)
     except (TMDBError, TelegramError) as exc:
-        log.error("Erreur réseau/API : %s", exc)
+        log.error("Network/API error: %s", exc)
         return EXIT_NETWORK
     except KeyError as exc:
-        log.error("Clé de config manquante : %s", exc)
+        log.error("Missing config key: %s", exc)
         return EXIT_CONFIG
 
 
